@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      # ── 1. Package the VSIX ──────────────────────────────────────────────────
+      - name: Package VSIX
+        run: npx vsce package --out go-fahh-${{ github.ref_name }}.vsix
+
+      # ── 2. Publish to VS Code Marketplace ───────────────────────────────────
+      #   Requires a Personal Access Token (PAT) stored as the repository secret
+      #   VSCE_PAT.  See README for setup instructions.
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx vsce publish --packagePath go-fahh-${{ github.ref_name }}.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      # ── 3. Create a GitHub Release and attach the VSIX ──────────────────────
+      #   This lets anyone install the extension via
+      #   "Extensions: Install from VSIX…" even without marketplace access.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: go-fahh-${{ github.ref_name }}.vsix
+          generate_release_notes: true

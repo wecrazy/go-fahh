@@ -4,6 +4,10 @@
   "description": "Plays the 'Fahh' meme sound effect the instant a Go error is detected while you type.",
   "version": "0.1.0",
   "publisher": "go-fahh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wecrazy/go-fahh.git"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -56,11 +60,14 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.9.1",
     "typescript": "^5.0.0"
   }
 }
