@@ -39,6 +39,7 @@ Download `go-fahh-<version>.vsix` from the [latest GitHub Release](https://githu
 
 - VS Code **1.74+**
 - The [Go extension](https://marketplace.visualstudio.com/items?itemName=golang.go) (or any Go language server such as **gopls**) should be installed so that errors are surfaced as diagnostics.
+- No external audio tooling is required (`ffmpeg`, `mpeg`, `mpg123`, etc.). The extension plays the bundled file `media/fahhh.mp3` directly in a VS Code webview.
 
 ---
 
@@ -59,6 +60,8 @@ Download `go-fahh-<version>.vsix` from the [latest GitHub Release](https://githu
 4. Fix the error — silence returns.
 
 > **First-run note:** Modern browsers (including VS Code's webview) may require at least one user interaction before an `AudioContext` can start. If the sound doesn't play on the very first error, click anywhere inside the **Go Fahh** panel once to unlock audio, then trigger the error again.
+
+> **VSIX note:** If you install from `.vsix` and still hear a different clip, uninstall old **Go Fahh** versions first, then reinstall the latest `.vsix`. The package is expected to contain `media/fahhh.mp3` as the only Fahh sound asset.
 
 ---
 
