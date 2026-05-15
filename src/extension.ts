@@ -95,6 +95,8 @@ function getOrCreateAudioPanel(
     context: vscode.ExtensionContext
 ): vscode.WebviewPanel {
     if (!audioPanel) {
+        const soundUrl = getValidatedSoundUrl();
+
         audioPanel = vscode.window.createWebviewPanel(
             'goFahhAudio',
             '🔊 Go Fahh',
@@ -105,7 +107,7 @@ function getOrCreateAudioPanel(
             }
         );
 
-        audioPanel.webview.html = buildWebviewHtml(FAHH_SOUND_URL);
+        audioPanel.webview.html = buildWebviewHtml(soundUrl);
 
         audioPanel.onDidDispose(() => {
             audioPanel = undefined;
@@ -113,6 +115,19 @@ function getOrCreateAudioPanel(
     }
 
     return audioPanel;
+}
+
+function getValidatedSoundUrl(): string {
+    const soundUrl = new URL(FAHH_SOUND_URL);
+
+    if (
+        soundUrl.protocol !== 'https:' ||
+        soundUrl.hostname !== 'www.myinstants.com'
+    ) {
+        throw new Error('Configured Fahh sound URL must use https://www.myinstants.com.');
+    }
+
+    return soundUrl.toString();
 }
 
 // ─── Webview HTML ─────────────────────────────────────────────────────────────
