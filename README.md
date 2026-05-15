@@ -10,7 +10,7 @@ A Visual Studio Code extension that plays the **"Fahh" meme sound effect** the i
 ## Features
 
 - **Real-time error detection** — uses `onDidChangeDiagnostics` so the sound fires the moment the Go language server (gopls) reports a new error. No save required.
-- **Uses the requested "Fahh" clip** — the extension plays the Myinstants sound effect from the original page <https://www.myinstants.com/en/instant/fahhhhhhhhhhhhhh-3525/> using its direct MP3 source at <https://www.myinstants.com/media/sounds/fahhhhhhhhhhhhhh.mp3>.
+- **Uses the requested "Fahh" clip** — the extension ships with the requested sound effect bundled locally, based on the original clip from <https://www.myinstants.com/en/instant/fahhhhhhhhhhhhhh-3525/>.
 - **Animated mascot panel** — a small panel displays a 😱 emoji that shakes on every fahh.
 - **Volume control** — adjust loudness through the setting `goFahh.volume` (0.0 – 1.0).
 - **Quick toggle** — use the command palette command `Go Fahh: Toggle Sound On/Off` to mute/unmute without changing any settings.
@@ -38,7 +38,6 @@ Download `go-fahh-<version>.vsix` from the [latest GitHub Release](https://githu
 ## Requirements
 
 - VS Code **1.74+**
-- Network access to Myinstants so the requested clip can load in the webview
 - The [Go extension](https://marketplace.visualstudio.com/items?itemName=golang.go) (or any Go language server such as **gopls**) should be installed so that errors are surfaced as diagnostics.
 
 ---

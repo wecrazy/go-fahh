@@ -8,9 +8,6 @@ const prevErrorCountByUri = new Map<string, number>();
 /** The single persistent WebviewPanel used for audio playback. */
 let audioPanel: vscode.WebviewPanel | undefined;
 
-/** Requested meme sound effect source. */
-const FAHH_SOUND_URL = 'https://www.myinstants.com/media/sounds/fahhhhhhhhhhhhhh.mp3';
-
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -95,17 +92,22 @@ function getOrCreateAudioPanel(
     context: vscode.ExtensionContext
 ): vscode.WebviewPanel {
     if (!audioPanel) {
+        const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
         audioPanel = vscode.window.createWebviewPanel(
             'goFahhAudio',
             '🔊 Go Fahh',
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
             {
                 enableScripts: true,
+                localResourceRoots: [mediaRoot],
                 retainContextWhenHidden: true, // keep AudioContext alive when hidden
             }
         );
 
-        audioPanel.webview.html = buildWebviewHtml();
+        const soundUri = audioPanel.webview.asWebviewUri(
+            vscode.Uri.joinPath(mediaRoot, 'fahhhhhhhhhhhhhh.mp3')
+        );
+        audioPanel.webview.html = buildWebviewHtml(soundUri.toString());
 
         audioPanel.onDidDispose(() => {
             audioPanel = undefined;
@@ -121,9 +123,9 @@ function getOrCreateAudioPanel(
  * Returns the HTML page that lives inside the WebviewPanel.
  *
  * It listens for `{ command: 'playFahh', volume }` messages and plays the
- * requested "Fahh" sound effect from Myinstants.
+ * bundled "Fahh" sound effect.
  */
-function buildWebviewHtml(): string {
+function buildWebviewHtml(soundUrl: string): string {
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -186,10 +188,10 @@ function buildWebviewHtml(): string {
   <audio id="fahh-audio" preload="auto"></audio>
 
   <script>
-    const soundUrl = ${JSON.stringify(FAHH_SOUND_URL)};
+    const soundUrl = ${JSON.stringify(soundUrl)};
     const audioUnlockPrompt = 'Click inside the panel once to enable audio playback.';
     const audioUnlockedStatus = 'Audio unlocked – awaiting Go errors…';
-    const audioLoadErrorStatus = 'Unable to load the Fahh sound clip from Myinstants.';
+    const audioLoadErrorStatus = 'Unable to load the bundled Fahh sound clip.';
     const audio = document.getElementById('fahh-audio');
     const status = document.getElementById('status');
     let audioLoadFailed = false;
