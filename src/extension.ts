@@ -124,7 +124,7 @@ function getValidatedSoundUrl(): string {
         soundUrl.protocol !== 'https:' ||
         soundUrl.hostname !== 'www.myinstants.com'
     ) {
-        throw new Error('Configured Fahh sound URL must use https://www.myinstants.com.');
+        throw new Error('Invalid Fahh sound URL: must use https://www.myinstants.com.');
     }
 
     return soundUrl.toString();
@@ -201,6 +201,8 @@ function buildWebviewHtml(soundUrl: string): string {
   <audio id="fahh-audio" preload="auto" src=${JSON.stringify(soundUrl)}></audio>
 
   <script>
+    const AUDIO_UNLOCK_PROMPT = 'Click inside the panel once to enable audio playback.';
+    const AUDIO_UNLOCKED_STATUS = 'Audio unlocked – awaiting Go errors…';
     const audio = document.getElementById('fahh-audio');
     const status = document.getElementById('status');
 
@@ -212,7 +214,7 @@ function buildWebviewHtml(soundUrl: string): string {
       try {
         await audio.play();
       } catch (error) {
-        status.textContent = 'Click inside the panel once to enable audio playback.';
+        status.textContent = AUDIO_UNLOCK_PROMPT;
         console.error('Unable to play Fahh sound', error);
       }
     }
@@ -245,7 +247,7 @@ function buildWebviewHtml(soundUrl: string): string {
         audio.pause();
         audio.currentTime = 0;
         audio.muted = false;
-        status.textContent = 'Audio unlocked – awaiting Go errors…';
+        status.textContent = AUDIO_UNLOCKED_STATUS;
       } catch (error) {
         audio.muted = false;
         console.error('Unable to unlock Fahh audio', error);
