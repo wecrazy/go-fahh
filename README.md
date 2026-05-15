@@ -1,5 +1,8 @@
 # Go Fahh 😱🔊
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/go-fahh.go-fahh?label=VS%20Code%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=go-fahh.go-fahh)
+[![CI](https://github.com/wecrazy/go-fahh/actions/workflows/ci.yml/badge.svg)](https://github.com/wecrazy/go-fahh/actions/workflows/ci.yml)
+
 A Visual Studio Code extension that plays the **"Fahh" meme sound effect** the instant a Go error is detected as you type — **zero latency** between the error appearing and the sound firing.
 
 ---
@@ -15,6 +18,23 @@ A Visual Studio Code extension that plays the **"Fahh" meme sound effect** the i
 - **Volume control** — adjust loudness through the setting `goFahh.volume` (0.0 – 1.0).
 - **Quick toggle** — use the command palette command `Go Fahh: Toggle Sound On/Off` to mute/unmute without changing any settings.
 - **Test command** — `Go Fahh: Test Sound` lets you preview the sound at any time.
+
+---
+
+## Installation
+
+### From the VS Code Marketplace (recommended)
+
+Search **"Go Fahh"** in the Extensions panel (`Ctrl+Shift+X`) or go directly to:
+
+> <https://marketplace.visualstudio.com/items?itemName=go-fahh.go-fahh>
+
+### From a VSIX file (alternative)
+
+Download `go-fahh-<version>.vsix` from the [latest GitHub Release](https://github.com/wecrazy/go-fahh/releases/latest), then:
+
+1. Open VS Code → `Ctrl+Shift+X` → `…` (top-right) → **Install from VSIX…**
+2. Select the downloaded file.
 
 ---
 
@@ -88,6 +108,42 @@ npm run watch
 ```
 
 Open the project in VS Code and press **F5** to launch the Extension Development Host.
+
+---
+
+## Publishing to the VS Code Marketplace
+
+The GitHub Actions [release workflow](.github/workflows/release.yml) handles publishing automatically when you push a version tag.
+
+### One-time setup
+
+1. **Create a publisher account** at <https://marketplace.visualstudio.com/manage>.  
+   The publisher ID must match the `"publisher"` field in `package.json` (`go-fahh`).
+
+2. **Generate a Personal Access Token (PAT)**  
+   Go to <https://dev.azure.com> → *User Settings* → *Personal access tokens*.  
+   Scope: **Marketplace → Manage** (full access).  
+   Copy the token — it is shown only once.
+
+3. **Add the PAT as a repository secret**  
+   GitHub repo → *Settings* → *Secrets and variables* → *Actions* → **New repository secret**:  
+   - Name: `VSCE_PAT`  
+   - Value: *your PAT*
+
+### Releasing a new version
+
+```bash
+# Bump the version in package.json (patch | minor | major)
+npm version patch          # → 0.1.1
+
+# Push the commit and the new tag
+git push && git push --tags
+```
+
+The release workflow will:
+1. Compile and package the `.vsix`
+2. Publish to the VS Code Marketplace (if `VSCE_PAT` secret is set)
+3. Create a GitHub Release with the `.vsix` attached
 
 ---
 
