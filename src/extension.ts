@@ -189,11 +189,23 @@ function buildWebviewHtml(): string {
     const soundUrl = ${JSON.stringify(FAHH_SOUND_URL)};
     const audioUnlockPrompt = 'Click inside the panel once to enable audio playback.';
     const audioUnlockedStatus = 'Audio unlocked – awaiting Go errors…';
+    const audioLoadErrorStatus = 'Unable to load the Fahh sound clip from Myinstants.';
     const audio = document.getElementById('fahh-audio');
     const status = document.getElementById('status');
+    let audioLoadFailed = false;
     audio.src = soundUrl;
+    audio.addEventListener('error', () => {
+      audioLoadFailed = true;
+      status.textContent = audioLoadErrorStatus;
+      console.error('Unable to load Fahh sound', audio.error);
+    });
 
     async function playFahh(volume) {
+      if (audioLoadFailed) {
+        status.textContent = audioLoadErrorStatus;
+        return;
+      }
+
       audio.pause();
       audio.currentTime = 0;
       audio.volume = Math.max(0, Math.min(1, volume ?? 0.7));

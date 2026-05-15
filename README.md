@@ -38,6 +38,7 @@ Download `go-fahh-<version>.vsix` from the [latest GitHub Release](https://githu
 ## Requirements
 
 - VS Code **1.74+**
+- Network access to Myinstants so the requested clip can load in the webview
 - The [Go extension](https://marketplace.visualstudio.com/items?itemName=golang.go) (or any Go language server such as **gopls**) should be installed so that errors are surfaced as diagnostics.
 
 ---
