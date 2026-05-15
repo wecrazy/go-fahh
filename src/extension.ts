@@ -130,6 +130,14 @@ function getValidatedSoundUrl(): string {
     return soundUrl.toString();
 }
 
+function escapeHtmlAttribute(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // ─── Webview HTML ─────────────────────────────────────────────────────────────
 
 /**
@@ -139,6 +147,8 @@ function getValidatedSoundUrl(): string {
  * requested "Fahh" sound effect from Myinstants.
  */
 function buildWebviewHtml(soundUrl: string): string {
+    const escapedSoundUrl = escapeHtmlAttribute(soundUrl);
+
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -198,7 +208,7 @@ function buildWebviewHtml(soundUrl: string): string {
   <div id="mascot">😱</div>
   <div id="label">GO FAHH</div>
   <div id="status">Ready – awaiting Go errors…</div>
-  <audio id="fahh-audio" preload="auto" src=${JSON.stringify(soundUrl)}></audio>
+  <audio id="fahh-audio" preload="auto" src="${escapedSoundUrl}"></audio>
 
   <script>
     const AUDIO_UNLOCK_PROMPT = 'Click inside the panel once to enable audio playback.';
