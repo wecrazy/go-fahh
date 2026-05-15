@@ -1,0 +1,66 @@
+{
+  "name": "go-fahh",
+  "displayName": "Go Fahh",
+  "description": "Plays the 'Fahh' meme sound effect the instant a Go error is detected while you type.",
+  "version": "0.1.0",
+  "publisher": "go-fahh",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "go",
+    "golang",
+    "error",
+    "sound",
+    "fahh",
+    "meme"
+  ],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onLanguage:go"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Go Fahh",
+      "properties": {
+        "goFahh.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the Go Fahh sound effect."
+        },
+        "goFahh.volume": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Volume of the Fahh sound effect (0.0 – 1.0)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "goFahh.toggle",
+        "title": "Go Fahh: Toggle Sound On/Off"
+      },
+      {
+        "command": "goFahh.test",
+        "title": "Go Fahh: Test Sound"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^5.0.0"
+  }
+}
