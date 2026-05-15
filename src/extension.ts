@@ -95,8 +95,6 @@ function getOrCreateAudioPanel(
     context: vscode.ExtensionContext
 ): vscode.WebviewPanel {
     if (!audioPanel) {
-        const soundUrl = getValidatedSoundUrl();
-
         audioPanel = vscode.window.createWebviewPanel(
             'goFahhAudio',
             '🔊 Go Fahh',
@@ -107,7 +105,7 @@ function getOrCreateAudioPanel(
             }
         );
 
-        audioPanel.webview.html = buildWebviewHtml(soundUrl);
+        audioPanel.webview.html = buildWebviewHtml();
 
         audioPanel.onDidDispose(() => {
             audioPanel = undefined;
@@ -115,27 +113,6 @@ function getOrCreateAudioPanel(
     }
 
     return audioPanel;
-}
-
-function getValidatedSoundUrl(): string {
-    const soundUrl = new URL(FAHH_SOUND_URL);
-
-    if (
-        soundUrl.protocol !== 'https:' ||
-        soundUrl.hostname !== 'www.myinstants.com'
-    ) {
-        throw new Error('Invalid Fahh sound URL: must use https://www.myinstants.com.');
-    }
-
-    return soundUrl.toString();
-}
-
-function escapeHtmlAttribute(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
 }
 
 // ─── Webview HTML ─────────────────────────────────────────────────────────────
@@ -146,9 +123,7 @@ function escapeHtmlAttribute(value: string): string {
  * It listens for `{ command: 'playFahh', volume }` messages and plays the
  * requested "Fahh" sound effect from Myinstants.
  */
-function buildWebviewHtml(soundUrl: string): string {
-    const escapedSoundUrl = escapeHtmlAttribute(soundUrl);
-
+function buildWebviewHtml(): string {
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -208,13 +183,15 @@ function buildWebviewHtml(soundUrl: string): string {
   <div id="mascot">😱</div>
   <div id="label">GO FAHH</div>
   <div id="status">Ready – awaiting Go errors…</div>
-  <audio id="fahh-audio" preload="auto" src="${escapedSoundUrl}"></audio>
+  <audio id="fahh-audio" preload="auto"></audio>
 
   <script>
-    const AUDIO_UNLOCK_PROMPT = 'Click inside the panel once to enable audio playback.';
-    const AUDIO_UNLOCKED_STATUS = 'Audio unlocked – awaiting Go errors…';
+    const soundUrl = ${JSON.stringify(FAHH_SOUND_URL)};
+    const audioUnlockPrompt = 'Click inside the panel once to enable audio playback.';
+    const audioUnlockedStatus = 'Audio unlocked – awaiting Go errors…';
     const audio = document.getElementById('fahh-audio');
     const status = document.getElementById('status');
+    audio.src = soundUrl;
 
     async function playFahh(volume) {
       audio.pause();
@@ -224,7 +201,7 @@ function buildWebviewHtml(soundUrl: string): string {
       try {
         await audio.play();
       } catch (error) {
-        status.textContent = AUDIO_UNLOCK_PROMPT;
+        status.textContent = audioUnlockPrompt;
         console.error('Unable to play Fahh sound', error);
       }
     }
@@ -257,7 +234,7 @@ function buildWebviewHtml(soundUrl: string): string {
         audio.pause();
         audio.currentTime = 0;
         audio.muted = false;
-        status.textContent = AUDIO_UNLOCKED_STATUS;
+        status.textContent = audioUnlockedStatus;
       } catch (error) {
         audio.muted = false;
         console.error('Unable to unlock Fahh audio', error);
