@@ -8,6 +8,9 @@ const prevErrorCountByUri = new Map<string, number>();
 /** The single persistent WebviewPanel used for audio playback. */
 let audioPanel: vscode.WebviewPanel | undefined;
 
+/** Requested meme sound effect source. */
+const FAHH_SOUND_URL = 'https://www.myinstants.com/media/sounds/fahhhhhhhhhhhhhh.mp3';
+
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -102,7 +105,7 @@ function getOrCreateAudioPanel(
             }
         );
 
-        audioPanel.webview.html = buildWebviewHtml();
+        audioPanel.webview.html = buildWebviewHtml(FAHH_SOUND_URL);
 
         audioPanel.onDidDispose(() => {
             audioPanel = undefined;
@@ -117,17 +120,10 @@ function getOrCreateAudioPanel(
 /**
  * Returns the HTML page that lives inside the WebviewPanel.
  *
- * It listens for `{ command: 'playFahh', volume }` messages and synthesises
- * the "Fahh" meme sound entirely via the Web Audio API – no external audio
- * files required.
- *
- * The sound mimics the classic descending "FAAAH" meme drop:
- *   • A buzzy sawtooth oscillator (voice) sweeping 380 Hz → 80 Hz over ~0.6 s
- *   • A low-pass filter that closes quickly, giving that "wah-wah" muffling
- *   • A sub-bass sine thump underneath for impact
- *   • A brief noise burst at the start to simulate the "F" fricative
+ * It listens for `{ command: 'playFahh', volume }` messages and plays the
+ * requested "Fahh" sound effect from Myinstants.
  */
-function buildWebviewHtml(): string {
+function buildWebviewHtml(soundUrl: string): string {
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -187,100 +183,23 @@ function buildWebviewHtml(): string {
   <div id="mascot">😱</div>
   <div id="label">GO FAHH</div>
   <div id="status">Ready – awaiting Go errors…</div>
+  <audio id="fahh-audio" preload="auto" src=${JSON.stringify(soundUrl)}></audio>
 
   <script>
-    // ── Audio context (lazy-init to respect browser autoplay policy) ──────────
-    let ctx = null;
+    const audio = document.getElementById('fahh-audio');
+    const status = document.getElementById('status');
 
-    function getCtx() {
-      if (!ctx || ctx.state === 'closed') {
-        ctx = new AudioContext();
-      }
-      return ctx;
-    }
-
-    // ── Fahh sound synthesis ──────────────────────────────────────────────────
-    /**
-     * Synthesises the "FAAAH" meme sound:
-     *   1. Short white-noise burst  → the "F" fricative consonant
-     *   2. Sawtooth + low-pass sweep → the descending "AAH" vowel
-     *   3. Sub-bass sine thump       → gut-punch impact
-     */
     async function playFahh(volume) {
-      const ac = getCtx();
-      if (ac.state === 'suspended') {
-        await ac.resume();
+      audio.pause();
+      audio.currentTime = 0;
+      audio.volume = Math.max(0, Math.min(1, volume ?? 0.7));
+
+      try {
+        await audio.play();
+      } catch (error) {
+        status.textContent = 'Click inside the panel once to enable audio playback.';
+        console.error('Unable to play Fahh sound', error);
       }
-
-      const now = ac.currentTime;
-      const master = ac.createGain();
-      master.gain.setValueAtTime(Math.max(0, Math.min(1, volume ?? 0.7)), now);
-      master.connect(ac.destination);
-
-      // ── 1. "F" fricative – filtered white noise (0 – 0.06 s) ───────────────
-      const bufSize = ac.sampleRate * 0.07;
-      const noiseBuffer = ac.createBuffer(1, bufSize, ac.sampleRate);
-      const noiseData = noiseBuffer.getChannelData(0);
-      for (let i = 0; i < bufSize; i++) {
-        noiseData[i] = Math.random() * 2 - 1;
-      }
-      const noiseSource = ac.createBufferSource();
-      noiseSource.buffer = noiseBuffer;
-
-      const noiseFilter = ac.createBiquadFilter();
-      noiseFilter.type = 'highpass';
-      noiseFilter.frequency.setValueAtTime(3000, now);
-
-      const noiseGain = ac.createGain();
-      noiseGain.gain.setValueAtTime(0.35, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-
-      noiseSource.connect(noiseFilter);
-      noiseFilter.connect(noiseGain);
-      noiseGain.connect(master);
-      noiseSource.start(now);
-      noiseSource.stop(now + 0.07);
-
-      // ── 2. "AAH" vowel – sawtooth + low-pass sweep (0.03 – 0.65 s) ─────────
-      const osc = ac.createOscillator();
-      osc.type = 'sawtooth';
-      // Frequency sweep: starts around E4 (~330 Hz), drops to ~90 Hz
-      osc.frequency.setValueAtTime(330, now + 0.03);
-      osc.frequency.setValueAtTime(300, now + 0.08);
-      osc.frequency.exponentialRampToValueAtTime(90, now + 0.62);
-
-      const lpf = ac.createBiquadFilter();
-      lpf.type = 'lowpass';
-      lpf.frequency.setValueAtTime(1800, now + 0.03);
-      lpf.frequency.exponentialRampToValueAtTime(280, now + 0.55);
-      lpf.Q.setValueAtTime(4, now + 0.03);
-
-      const oscGain = ac.createGain();
-      oscGain.gain.setValueAtTime(0.0,  now + 0.03);
-      oscGain.gain.linearRampToValueAtTime(0.75, now + 0.07); // attack
-      oscGain.gain.setValueAtTime(0.75, now + 0.15);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.65); // decay
-
-      osc.connect(lpf);
-      lpf.connect(oscGain);
-      oscGain.connect(master);
-      osc.start(now + 0.03);
-      osc.stop(now + 0.68);
-
-      // ── 3. Sub-bass thump – sine (0 – 0.30 s) ───────────────────────────────
-      const sub = ac.createOscillator();
-      sub.type = 'sine';
-      sub.frequency.setValueAtTime(100, now);
-      sub.frequency.exponentialRampToValueAtTime(40, now + 0.28);
-
-      const subGain = ac.createGain();
-      subGain.gain.setValueAtTime(0.5, now);
-      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
-
-      sub.connect(subGain);
-      subGain.connect(master);
-      sub.start(now);
-      sub.stop(now + 0.32);
     }
 
     // ── Shake mascot ──────────────────────────────────────────────────────────
@@ -291,7 +210,6 @@ function buildWebviewHtml(): string {
       void el.offsetWidth;
       el.classList.add('fahh-shake');
 
-      const status = document.getElementById('status');
       status.textContent = '💥 FAHH! Go error detected at ' + new Date().toLocaleTimeString();
     }
 
@@ -304,11 +222,18 @@ function buildWebviewHtml(): string {
       }
     });
 
-    // ── Click anywhere to unlock AudioContext (browser autoplay policy) ──────
-    document.addEventListener('click', () => {
-      const ac = getCtx();
-      if (ac.state === 'suspended') {
-        ac.resume();
+    // ── Click anywhere to unlock HTML audio playback ──────────────────────────
+    document.addEventListener('click', async () => {
+      try {
+        audio.muted = true;
+        await audio.play();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        status.textContent = 'Audio unlocked – awaiting Go errors…';
+      } catch (error) {
+        audio.muted = false;
+        console.error('Unable to unlock Fahh audio', error);
       }
     }, { once: true });
   </script>
