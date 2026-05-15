@@ -10,10 +10,7 @@ A Visual Studio Code extension that plays the **"Fahh" meme sound effect** the i
 ## Features
 
 - **Real-time error detection** — uses `onDidChangeDiagnostics` so the sound fires the moment the Go language server (gopls) reports a new error. No save required.
-- **Synthesised "Fahh" sound** — the meme's signature descending bass drop is produced entirely via the **Web Audio API** (no audio files needed):
-  - A high-frequency noise burst simulates the initial "F" fricative
-  - A sawtooth oscillator sweeps from ~330 Hz down to ~90 Hz for the "AAAH" vowel
-  - A sub-bass sine thump gives it that gut-punch meme impact
+- **Uses the requested "Fahh" clip** — the extension ships with the requested sound effect bundled locally, based on the original clip from <https://www.myinstants.com/en/instant/fahhhhhhhhhhhhhh-3525/>.
 - **Animated mascot panel** — a small panel displays a 😱 emoji that shakes on every fahh.
 - **Volume control** — adjust loudness through the setting `goFahh.volume` (0.0 – 1.0).
 - **Quick toggle** — use the command palette command `Go Fahh: Toggle Sound On/Off` to mute/unmute without changing any settings.
@@ -89,7 +86,7 @@ VS Code fires `onDidChangeDiagnostics`
 WebviewPanel receives `postMessage({ command: 'playFahh', volume })`
       │
       ▼
-Web Audio API synthesises "FAAAH" 🔊  +  😱 emoji shakes
+Webview plays the requested "FAHH" clip 🔊  +  😱 emoji shakes
 ```
 
 ---
