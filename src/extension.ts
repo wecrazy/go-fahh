@@ -105,7 +105,7 @@ function getOrCreateAudioPanel(
         );
 
         const soundUri = audioPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(mediaRoot, 'fahhhhhhhhhhhhhh.mp3')
+            vscode.Uri.joinPath(mediaRoot, 'fahhh.mp3')
         );
         audioPanel.webview.html = buildWebviewHtml(soundUri.toString());
 
