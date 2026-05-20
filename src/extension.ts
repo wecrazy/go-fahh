@@ -1,24 +1,23 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/**
- * How long (ms) to keep the PowerShell audio process alive on Windows.
- * The fahh clip is ~3 s; 5 s gives a comfortable buffer.
- */
-const AUDIO_PLAYBACK_TIMEOUT_MS = 5000;
-
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
 /** Tracks the error count per file URI so we only react to *new* errors. */
 const prevErrorCountByUri = new Map<string, number>();
 
+/** Output channel for Go Fahh logs — visible in the Output panel. */
+let log: vscode.OutputChannel;
+
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
+    log = vscode.window.createOutputChannel('Go Fahh');
+    context.subscriptions.push(log);
+    log.appendLine('Go Fahh extension activated.');
+
     // Watch diagnostics for any file – filter to Go inside the handler.
     const diagListener = vscode.languages.onDidChangeDiagnostics((event) => {
         const cfg = vscode.workspace.getConfiguration('goFahh');
@@ -62,8 +61,10 @@ export function activate(context: vscode.ExtensionContext): void {
         );
     });
 
-    // Command: play test sound
+    // Command: play test sound – shows the output panel so you can see any errors.
     const testCmd = vscode.commands.registerCommand('goFahh.test', () => {
+        log.show(true);
+        log.appendLine('--- Test Sound triggered ---');
         playFahh(context);
     });
 
@@ -85,6 +86,15 @@ function playFahh(context: vscode.ExtensionContext): void {
     const volume = cfg.get<number>('volume', 0.7);
     const soundPath = path.join(context.extensionPath, 'media', 'fahhh.mp3');
 
+    log.appendLine(`Platform: ${process.platform}  |  Volume: ${volume}  |  Sound: ${soundPath}`);
+
+    if (!fs.existsSync(soundPath)) {
+        log.appendLine(`ERROR: Sound file not found at "${soundPath}"`);
+        log.show(true);
+        vscode.window.showErrorMessage(`Go Fahh: sound file not found – check the Output panel (Go Fahh) for details.`);
+        return;
+    }
+
     playAudioNative(soundPath, volume);
 }
 
@@ -93,15 +103,14 @@ function playFahh(context: vscode.ExtensionContext): void {
  * background without opening any VS Code tab or UI element.
  *
  * - macOS  : `afplay`  (built-in)
- * - Windows: PowerShell `System.Windows.Media.MediaPlayer`
+ * - Windows: PowerShell + inline C# calling mciSendString (winmm.dll)
  * - Linux  : tries `paplay` → `mpg123` → `ffplay` in order
  */
 function playAudioNative(soundPath: string, volume: number): void {
     try {
-        const opts: cp.SpawnOptions = { detached: true, stdio: 'ignore' };
-
         switch (process.platform) {
             case 'darwin': {
+                const opts: cp.SpawnOptions = { detached: true, stdio: 'ignore' };
                 // afplay -v accepts a floating-point multiplier (1.0 = normal)
                 const child = cp.spawn('afplay', ['-v', String(volume), soundPath], opts);
                 child.unref();
@@ -109,35 +118,81 @@ function playAudioNative(soundPath: string, volume: number): void {
             }
 
             case 'win32': {
-                // Use PowerShell's WPF MediaPlayer – hidden window, no extra installs needed.
-                const safePath = soundPath.replace(/\\/g, '/').replace(/'/g, "''");
-                const script = [
-                    'Add-Type -AssemblyName PresentationCore;',
-                    `$p = New-Object System.Windows.Media.MediaPlayer;`,
-                    `$p.Open([Uri]'file:///${safePath}');`,
-                    `$p.Volume = ${volume};`,
-                    // Poll until NaturalDuration is available (media is loaded) or 3 s pass.
-                    `$i = 0; while ($p.NaturalDuration.HasTimeSpan -eq $false -and $i -lt 30) { Start-Sleep -Milliseconds 100; $i++ };`,
-                    `$p.Play();`,
-                    `Start-Sleep -Milliseconds ${AUDIO_PLAYBACK_TIMEOUT_MS};`,
-                ].join(' ');
+                // mciSendString (winmm.dll) via inline C#.
+                // It is fully synchronous ("play snd wait" blocks until done),
+                // requires no STA thread, no Dispatcher loop, and works on every
+                // Windows version that ships with Windows Media runtime.
+                // Volume unit: 0–1000  (1000 = 100 %)
+                const volInt = Math.round(volume * 1000);
+
+                // The sound path is passed through an environment variable so
+                // that backslashes and spaces never need escaping inside the script.
+                const ps = [
+                    `try {`,
+                    `  Add-Type -TypeDefinition @'`,
+                    `using System;`,
+                    `using System.Runtime.InteropServices;`,
+                    `using System.Text;`,
+                    `public class WinAudio {`,
+                    `    [DllImport("winmm.dll", CharSet=CharSet.Auto)]`,
+                    `    public static extern int mciSendString(string cmd, StringBuilder ret, int retLen, IntPtr cb);`,
+                    `}`,
+                    `'@`,
+                    `  $p = $env:GOFAHH_PATH`,
+                    `  $r = [WinAudio]::mciSendString("open ""$p"" type mpegvideo alias snd", $null, 0, [IntPtr]::Zero)`,
+                    `  if ($r -ne 0) { throw "mciSendString open failed (code $r) - check the file exists and is a valid MP3" }`,
+                    `  [WinAudio]::mciSendString("setaudio snd volume to ${volInt}", $null, 0, [IntPtr]::Zero) | Out-Null`,
+                    `  [WinAudio]::mciSendString("play snd wait", $null, 0, [IntPtr]::Zero) | Out-Null`,
+                    `  [WinAudio]::mciSendString("close snd", $null, 0, [IntPtr]::Zero) | Out-Null`,
+                    `} catch {`,
+                    `  Write-Error $_.Exception.Message`,
+                    `  exit 1`,
+                    `}`,
+                ].join('\r\n');
+
+                // -EncodedCommand expects UTF-16LE base64; avoids any shell-quoting issues.
+                const encoded = Buffer.from(ps, 'utf-16le').toString('base64');
+                const env = { ...process.env, GOFAHH_PATH: soundPath };
+
                 const child = cp.spawn(
                     'powershell',
-                    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
-                    { ...opts, windowsHide: true }
+                    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+                    { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env }
                 );
-                child.unref();
+
+                const errChunks: Buffer[] = [];
+                child.stderr?.on('data', (d: Buffer) => { errChunks.push(d); });
+                child.stdout?.on('data', (d: Buffer) => {
+                    const msg = d.toString().trim();
+                    if (msg) { log.appendLine(`[win32 stdout] ${msg}`); }
+                });
+                child.on('close', (code) => {
+                    const errBuf = Buffer.concat(errChunks).toString().trim();
+                    if (code !== 0 || errBuf) {
+                        log.appendLine(`[win32 error] exit code=${code}  stderr: ${errBuf}`);
+                        log.show(true);
+                    } else {
+                        log.appendLine('[win32] Playback complete.');
+                    }
+                });
+                child.on('error', (err) => {
+                    log.appendLine(`[win32 spawn error] ${err.message}`);
+                    log.show(true);
+                });
                 break;
             }
 
             default: {
+                const opts: cp.SpawnOptions = { detached: true, stdio: 'ignore' };
                 // Linux / other – try players in order of preference
                 spawnWithFallbacks(soundPath, volume, opts);
                 break;
             }
         }
-    } catch {
-        // Audio is non-critical; silently swallow any spawn errors.
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.appendLine(`[error] Failed to start audio: ${msg}`);
+        log.show(true);
     }
 }
 
