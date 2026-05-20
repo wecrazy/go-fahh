@@ -1,12 +1,11 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as path from 'path';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
 /** Tracks the error count per file URI so we only react to *new* errors. */
 const prevErrorCountByUri = new Map<string, number>();
-
-/** The single persistent WebviewPanel used for audio playback. */
-let audioPanel: vscode.WebviewPanel | undefined;
 
 // ─── Activation ──────────────────────────────────────────────────────────────
 
@@ -63,198 +62,94 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-    if (audioPanel) {
-        audioPanel.dispose();
-        audioPanel = undefined;
-    }
     prevErrorCountByUri.clear();
 }
 
 // ─── Audio helpers ────────────────────────────────────────────────────────────
 
 /**
- * Send a play-sound message to the persistent WebviewPanel.
- * Creates the panel if it does not yet exist (e.g. first error or after user closes it).
+ * Play the Fahh sound using the native OS audio player.
+ * No WebviewPanel or tab is opened — audio runs entirely in the background.
  */
 function playFahh(context: vscode.ExtensionContext): void {
     const cfg = vscode.workspace.getConfiguration('goFahh');
     const volume = cfg.get<number>('volume', 0.7);
+    const soundPath = path.join(context.extensionPath, 'media', 'fahhh.mp3');
 
-    const panel = getOrCreateAudioPanel(context);
-    panel.webview.postMessage({ command: 'playFahh', volume });
+    playAudioNative(soundPath, volume);
 }
 
 /**
- * Returns the existing WebviewPanel or creates a fresh one.
- * The panel is placed in an inactive column so it does not steal focus.
- */
-function getOrCreateAudioPanel(
-    context: vscode.ExtensionContext
-): vscode.WebviewPanel {
-    if (!audioPanel) {
-        const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
-        audioPanel = vscode.window.createWebviewPanel(
-            'goFahhAudio',
-            '🔊 Go Fahh',
-            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-            {
-                enableScripts: true,
-                localResourceRoots: [mediaRoot],
-                retainContextWhenHidden: true, // keep AudioContext alive when hidden
-            }
-        );
-
-        const soundUri = audioPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(mediaRoot, 'fahhh.mp3')
-        );
-        audioPanel.webview.html = buildWebviewHtml(soundUri.toString());
-
-        audioPanel.onDidDispose(() => {
-            audioPanel = undefined;
-        }, null, context.subscriptions);
-    }
-
-    return audioPanel;
-}
-
-// ─── Webview HTML ─────────────────────────────────────────────────────────────
-
-/**
- * Returns the HTML page that lives inside the WebviewPanel.
+ * Spawn a platform-specific audio player to play an MP3 file in the
+ * background without opening any VS Code tab or UI element.
  *
- * It listens for `{ command: 'playFahh', volume }` messages and plays the
- * bundled "Fahh" sound effect.
+ * - macOS  : `afplay`  (built-in)
+ * - Windows: PowerShell `System.Windows.Media.MediaPlayer`
+ * - Linux  : tries `paplay` → `mpg123` → `ffplay` in order
  */
-function buildWebviewHtml(soundUrl: string): string {
-    return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Go Fahh</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      background: #1e1e1e;
-      color: #d4d4d4;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      overflow: hidden;
-      user-select: none;
-    }
-    #mascot {
-      font-size: 80px;
-      line-height: 1;
-      transition: transform 0.05s;
-    }
-    #label {
-      margin-top: 12px;
-      font-size: 22px;
-      font-weight: 600;
-      letter-spacing: 2px;
-      color: #569cd6;
-    }
-    #status {
-      margin-top: 8px;
-      font-size: 12px;
-      color: #6a9955;
-      height: 18px;
-    }
+function playAudioNative(soundPath: string, volume: number): void {
+    try {
+        const opts: cp.SpawnOptions = { detached: true, stdio: 'ignore' };
 
-    /* Shake animation triggered on each fahh */
-    @keyframes shake {
-      0%   { transform: translate(0,0)   rotate(0deg);   }
-      15%  { transform: translate(-8px, 4px) rotate(-6deg);  }
-      30%  { transform: translate(8px, -4px) rotate(6deg);   }
-      45%  { transform: translate(-6px, 4px) rotate(-4deg);  }
-      60%  { transform: translate(6px, -2px) rotate(4deg);   }
-      75%  { transform: translate(-3px, 2px) rotate(-2deg);  }
-      90%  { transform: translate(3px, -1px) rotate(1deg);   }
-      100% { transform: translate(0,0)   rotate(0deg);   }
+        switch (process.platform) {
+            case 'darwin': {
+                // afplay -v accepts a floating-point multiplier (1.0 = normal)
+                const child = cp.spawn('afplay', ['-v', String(volume), soundPath], opts);
+                child.unref();
+                break;
+            }
+
+            case 'win32': {
+                // Use PowerShell's WPF MediaPlayer – hidden window, no extra installs needed.
+                const safePath = soundPath.replace(/\\/g, '/');
+                const script = [
+                    'Add-Type -AssemblyName PresentationCore;',
+                    `$p = New-Object System.Windows.Media.MediaPlayer;`,
+                    `$p.Open([Uri]'file:///${safePath}');`,
+                    `$p.Volume = ${volume};`,
+                    `$p.Play();`,
+                    `Start-Sleep -Milliseconds 5000;`,
+                ].join(' ');
+                const child = cp.spawn(
+                    'powershell',
+                    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+                    { ...opts, windowsHide: true }
+                );
+                child.unref();
+                break;
+            }
+
+            default: {
+                // Linux / other – try players in order of preference
+                spawnWithFallbacks(soundPath, opts);
+                break;
+            }
+        }
+    } catch {
+        // Audio is non-critical; silently swallow any spawn errors.
     }
-    .fahh-shake {
-      animation: shake 0.55s ease-in-out;
-    }
-  </style>
-</head>
-<body>
-  <div id="mascot">😱</div>
-  <div id="label">GO FAHH</div>
-  <div id="status">Ready – awaiting Go errors…</div>
-  <audio id="fahh-audio" preload="auto"></audio>
+}
 
-  <script>
-    const soundUrl = ${JSON.stringify(soundUrl)};
-    const audioUnlockPrompt = 'Click inside the panel once to enable audio playback.';
-    const audioUnlockedStatus = 'Audio unlocked – awaiting Go errors…';
-    const audioLoadErrorStatus = 'Unable to load the bundled Fahh sound clip.';
-    const audio = document.getElementById('fahh-audio');
-    const status = document.getElementById('status');
-    let audioLoadFailed = false;
-    audio.src = soundUrl;
-    audio.addEventListener('error', () => {
-      audioLoadFailed = true;
-      status.textContent = audioLoadErrorStatus;
-      console.error('Unable to load Fahh sound', audio.error);
-    });
+/**
+ * On Linux, try audio players one by one until one succeeds.
+ * Preference order: paplay (PulseAudio/PipeWire) → mpg123 → ffplay
+ */
+function spawnWithFallbacks(soundPath: string, opts: cp.SpawnOptions): void {
+    const players: Array<{ cmd: string; args: string[] }> = [
+        { cmd: 'paplay', args: [soundPath] },
+        { cmd: 'mpg123', args: ['-q', soundPath] },
+        { cmd: 'ffplay', args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', soundPath] },
+    ];
 
-    async function playFahh(volume) {
-      if (audioLoadFailed) {
-        status.textContent = audioLoadErrorStatus;
-        return;
-      }
-
-      audio.pause();
-      audio.currentTime = 0;
-      audio.volume = Math.max(0, Math.min(1, volume ?? 0.7));
-
-      try {
-        await audio.play();
-      } catch (error) {
-        status.textContent = audioUnlockPrompt;
-        console.error('Unable to play Fahh sound', error);
-      }
+    function tryNext(index: number): void {
+        if (index >= players.length) {
+            return;
+        }
+        const { cmd, args } = players[index];
+        const child = cp.spawn(cmd, args, opts);
+        child.on('error', () => tryNext(index + 1));
+        child.unref();
     }
 
-    // ── Shake mascot ──────────────────────────────────────────────────────────
-    function shakeMascot() {
-      const el = document.getElementById('mascot');
-      el.classList.remove('fahh-shake');
-      // Force reflow so the animation restarts even if already shaking
-      void el.offsetWidth;
-      el.classList.add('fahh-shake');
-
-      status.textContent = '💥 FAHH! Go error detected at ' + new Date().toLocaleTimeString();
-    }
-
-    // ── Message listener (from VS Code extension host) ───────────────────────
-    window.addEventListener('message', (event) => {
-      const msg = event.data;
-      if (msg && msg.command === 'playFahh') {
-        playFahh(msg.volume);
-        shakeMascot();
-      }
-    });
-
-    // ── Click anywhere to unlock HTML audio playback ──────────────────────────
-    document.addEventListener('click', async () => {
-      try {
-        audio.muted = true;
-        await audio.play();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.muted = false;
-        status.textContent = audioUnlockedStatus;
-      } catch (error) {
-        audio.muted = false;
-        console.error('Unable to unlock Fahh audio', error);
-      }
-    }, { once: true });
-  </script>
-</body>
-</html>`;
+    tryNext(0);
 }
