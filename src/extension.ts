@@ -10,11 +10,6 @@ import * as path from 'path';
  */
 const AUDIO_PLAYBACK_TIMEOUT_MS = 5000;
 
-/**
- * How long (ms) to wait after MediaPlayer.Open() before calling Play() on
- * Windows. Open() is asynchronous; calling Play() too early silently no-ops.
- */
-const MEDIA_LOAD_WAIT_MS = 500;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +116,8 @@ function playAudioNative(soundPath: string, volume: number): void {
                     `$p = New-Object System.Windows.Media.MediaPlayer;`,
                     `$p.Open([Uri]'file:///${safePath}');`,
                     `$p.Volume = ${volume};`,
-                    `Start-Sleep -Milliseconds ${MEDIA_LOAD_WAIT_MS};`,
+                    // Poll until NaturalDuration is available (media is loaded) or 3 s pass.
+                    `$i = 0; while ($p.NaturalDuration.HasTimeSpan -eq $false -and $i -lt 30) { Start-Sleep -Milliseconds 100; $i++ };`,
                     `$p.Play();`,
                     `Start-Sleep -Milliseconds ${AUDIO_PLAYBACK_TIMEOUT_MS};`,
                 ].join(' ');
@@ -183,7 +179,7 @@ function spawnWithFallbacks(soundPath: string, volume: number, opts: cp.SpawnOpt
         };
 
         child.on('error', advance);
-        child.on('exit', (code) => { if (code !== 0) { advance(); } });
+        child.on('exit', (code) => { if (code !== 0 && code !== null) { advance(); } });
         child.unref();
     }
 
