@@ -10,6 +10,12 @@ import * as path from 'path';
  */
 const AUDIO_PLAYBACK_TIMEOUT_MS = 5000;
 
+/**
+ * How long (ms) to wait after MediaPlayer.Open() before calling Play() on
+ * Windows. Open() is asynchronous; calling Play() too early silently no-ops.
+ */
+const MEDIA_LOAD_WAIT_MS = 500;
+
 // ─── State ───────────────────────────────────────────────────────────────────
 
 /** Tracks the error count per file URI so we only react to *new* errors. */
@@ -115,6 +121,7 @@ function playAudioNative(soundPath: string, volume: number): void {
                     `$p = New-Object System.Windows.Media.MediaPlayer;`,
                     `$p.Open([Uri]'file:///${safePath}');`,
                     `$p.Volume = ${volume};`,
+                    `Start-Sleep -Milliseconds ${MEDIA_LOAD_WAIT_MS};`,
                     `$p.Play();`,
                     `Start-Sleep -Milliseconds ${AUDIO_PLAYBACK_TIMEOUT_MS};`,
                 ].join(' ');
@@ -164,7 +171,19 @@ function spawnWithFallbacks(soundPath: string, volume: number, opts: cp.SpawnOpt
         }
         const { cmd, args } = players[index];
         const child = cp.spawn(cmd, args, opts);
-        child.on('error', () => tryNext(index + 1));
+
+        // Guard so that 'error' (ENOENT) and 'exit' (non-zero) don't both
+        // trigger the fallback when a command is simply not installed.
+        let advanced = false;
+        const advance = () => {
+            if (!advanced) {
+                advanced = true;
+                tryNext(index + 1);
+            }
+        };
+
+        child.on('error', advance);
+        child.on('exit', (code) => { if (code !== 0) { advance(); } });
         child.unref();
     }
 
