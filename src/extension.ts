@@ -10,6 +10,7 @@ import * as path from 'path';
  */
 const AUDIO_PLAYBACK_TIMEOUT_MS = 5000;
 
+
 // ─── State ───────────────────────────────────────────────────────────────────
 
 /** Tracks the error count per file URI so we only react to *new* errors. */
@@ -109,12 +110,14 @@ function playAudioNative(soundPath: string, volume: number): void {
 
             case 'win32': {
                 // Use PowerShell's WPF MediaPlayer – hidden window, no extra installs needed.
-                const safePath = soundPath.replace(/\\/g, '/');
+                const safePath = soundPath.replace(/\\/g, '/').replace(/'/g, "''");
                 const script = [
                     'Add-Type -AssemblyName PresentationCore;',
                     `$p = New-Object System.Windows.Media.MediaPlayer;`,
                     `$p.Open([Uri]'file:///${safePath}');`,
                     `$p.Volume = ${volume};`,
+                    // Poll until NaturalDuration is available (media is loaded) or 3 s pass.
+                    `$i = 0; while ($p.NaturalDuration.HasTimeSpan -eq $false -and $i -lt 30) { Start-Sleep -Milliseconds 100; $i++ };`,
                     `$p.Play();`,
                     `Start-Sleep -Milliseconds ${AUDIO_PLAYBACK_TIMEOUT_MS};`,
                 ].join(' ');
@@ -164,7 +167,21 @@ function spawnWithFallbacks(soundPath: string, volume: number, opts: cp.SpawnOpt
         }
         const { cmd, args } = players[index];
         const child = cp.spawn(cmd, args, opts);
-        child.on('error', () => tryNext(index + 1));
+
+        // Guard so that 'error' (ENOENT) and 'exit' (non-zero) don't both
+        // trigger the fallback when a command is simply not installed.
+        let advanced = false;
+        const advance = () => {
+            if (!advanced) {
+                advanced = true;
+                tryNext(index + 1);
+            }
+        };
+
+        child.on('error', advance);
+        child.on('exit', (code, signal) => {
+            if ((code !== 0 && code !== null) || signal !== null) { advance(); }
+        });
         child.unref();
     }
 
