@@ -8,6 +8,15 @@ import * as path from 'path';
 /** Tracks the error count per file URI so we only react to *new* errors. */
 const prevErrorCountByUri = new Map<string, number>();
 
+/**
+ * URIs that have received a diagnostic change event and are waiting to be
+ * evaluated once the burst of rapid updates has settled.
+ */
+const pendingUris = new Set<string>();
+
+/** Debounce handle for the diagnostic listener. */
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
 /** Output channel for Go Fahh logs — visible in the Output panel. */
 let log: vscode.OutputChannel;
 
@@ -19,36 +28,60 @@ export function activate(context: vscode.ExtensionContext): void {
     log.appendLine('Go Fahh extension activated.');
 
     // Watch diagnostics for any file – filter to Go inside the handler.
+    //
+    // VS Code (and gopls) fires onDidChangeDiagnostics several times in rapid
+    // succession for the same save/edit — once per diagnostic source and
+    // sometimes with intermediate partial states (e.g. 0 errors, then 2 errors,
+    // then 1 error as they settle).  Processing each event individually would
+    // play the sound multiple times for a single real error.
+    //
+    // Fix: collect affected URIs and only evaluate + play after a short quiet
+    // period (200 ms).  The count we compare against (prevErrorCountByUri) is
+    // the count from *before* the burst, so a net new error is detected
+    // correctly even when the count temporarily dips to 0 mid-burst.
     const diagListener = vscode.languages.onDidChangeDiagnostics((event) => {
         const cfg = vscode.workspace.getConfiguration('goFahh');
         if (!cfg.get<boolean>('enabled', true)) {
             return;
         }
 
-        let newErrorFound = false;
-
         for (const uri of event.uris) {
-            if (!uri.fsPath.endsWith('.go')) {
-                continue;
+            if (uri.fsPath.endsWith('.go')) {
+                pendingUris.add(uri.toString());
             }
-
-            const diagnostics = vscode.languages.getDiagnostics(uri);
-            const errorCount = diagnostics.filter(
-                (d) => d.severity === vscode.DiagnosticSeverity.Error
-            ).length;
-
-            const prevCount = prevErrorCountByUri.get(uri.toString()) ?? 0;
-
-            if (errorCount > prevCount) {
-                newErrorFound = true;
-            }
-
-            prevErrorCountByUri.set(uri.toString(), errorCount);
         }
 
-        if (newErrorFound) {
-            playFahh(context);
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
         }
+
+        debounceTimer = setTimeout(() => {
+            debounceTimer = undefined;
+
+            let newErrorFound = false;
+
+            for (const uriStr of pendingUris) {
+                const uri = vscode.Uri.parse(uriStr);
+                const diagnostics = vscode.languages.getDiagnostics(uri);
+                const errorCount = diagnostics.filter(
+                    (d) => d.severity === vscode.DiagnosticSeverity.Error
+                ).length;
+
+                const prevCount = prevErrorCountByUri.get(uriStr) ?? 0;
+
+                if (errorCount > prevCount) {
+                    newErrorFound = true;
+                }
+
+                prevErrorCountByUri.set(uriStr, errorCount);
+            }
+
+            pendingUris.clear();
+
+            if (newErrorFound) {
+                playFahh(context);
+            }
+        }, 200);
     });
 
     // Command: toggle the extension on/off
@@ -72,6 +105,11 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+    }
+    pendingUris.clear();
     prevErrorCountByUri.clear();
 }
 
@@ -118,17 +156,39 @@ function playAudioNative(soundPath: string, volume: number): void {
             }
 
             case 'win32': {
-                // mciSendString (winmm.dll) via inline C#.
-                // It is fully synchronous ("play snd wait" blocks until done),
-                // requires no STA thread, no Dispatcher loop, and works on every
-                // Windows version that ships with Windows Media runtime.
-                // Volume unit: 0–1000  (1000 = 100 %)
+                // First try: WMPlayer.OCX COM object.
+                // Unlike mciSendString this requires NO inline C# compilation
+                // (Add-Type -TypeDefinition JIT overhead is ~500–1500 ms), so
+                // playback starts noticeably faster.
+                //
+                // Volume unit for WMPlayer: 0–100 (integer percentage).
+                // Volume unit for mciSendString fallback: 0–1000.
+                const volPct = Math.round(volume * 100);
                 const volInt = Math.round(volume * 1000);
 
                 // The sound path is passed through an environment variable so
-                // that backslashes and spaces never need escaping inside the script.
+                // that backslashes and spaces never need escaping inside the
+                // script.
                 const ps = [
                     `try {`,
+                    `  # Fast path: WMPlayer COM object (no C# compilation needed)`,
+                    `  $wmp = New-Object -ComObject WMPlayer.OCX -ErrorAction Stop`,
+                    `  $wmp.settings.volume = ${volPct}`,
+                    `  $wmp.URL = $env:GOFAHH_PATH`,
+                    `  $wmp.controls.play()`,
+                    `  # Wait for playback to start (state 3 = Playing)`,
+                    `  $start = Get-Date`,
+                    `  while ($wmp.playState -ne 3 -and ((Get-Date) - $start).TotalSeconds -lt 5) {`,
+                    `    Start-Sleep -Milliseconds 50`,
+                    `  }`,
+                    `  # Wait for playback to finish (state 1 = Stopped)`,
+                    `  $timeout = (Get-Date).AddSeconds(30)`,
+                    `  while ($wmp.playState -ne 1 -and (Get-Date) -lt $timeout) {`,
+                    `    Start-Sleep -Milliseconds 100`,
+                    `  }`,
+                    `  $wmp.controls.stop()`,
+                    `} catch {`,
+                    `  # Fallback: mciSendString via inline C# (slower first call due to JIT)`,
                     `  Add-Type -TypeDefinition @'`,
                     `using System;`,
                     `using System.Runtime.InteropServices;`,
@@ -137,16 +197,13 @@ function playAudioNative(soundPath: string, volume: number): void {
                     `    [DllImport("winmm.dll", CharSet=CharSet.Auto)]`,
                     `    public static extern int mciSendString(string cmd, StringBuilder ret, int retLen, IntPtr cb);`,
                     `}`,
-                    `'@`,
+                    `'@ -ErrorAction SilentlyContinue`,
                     `  $p = $env:GOFAHH_PATH`,
                     `  $r = [WinAudio]::mciSendString("open ""$p"" type mpegvideo alias snd", $null, 0, [IntPtr]::Zero)`,
-                    `  if ($r -ne 0) { throw "mciSendString open failed (code $r) - check the file exists and is a valid MP3" }`,
+                    `  if ($r -ne 0) { throw "mciSendString open failed (code $r)" }`,
                     `  [WinAudio]::mciSendString("setaudio snd volume to ${volInt}", $null, 0, [IntPtr]::Zero) | Out-Null`,
                     `  [WinAudio]::mciSendString("play snd wait", $null, 0, [IntPtr]::Zero) | Out-Null`,
                     `  [WinAudio]::mciSendString("close snd", $null, 0, [IntPtr]::Zero) | Out-Null`,
-                    `} catch {`,
-                    `  Write-Error $_.Exception.Message`,
-                    `  exit 1`,
                     `}`,
                 ].join('\r\n');
 
@@ -167,8 +224,12 @@ function playAudioNative(soundPath: string, volume: number): void {
                     if (msg) { log.appendLine(`[win32 stdout] ${msg}`); }
                 });
                 child.on('close', (code) => {
-                    const errBuf = Buffer.concat(errChunks).toString().trim();
-                    if (code !== 0 || errBuf) {
+                    // Only treat as an error when the process itself failed.
+                    // PowerShell sometimes writes a "#< CLIXML" header to stderr
+                    // even on success (exit code 0); logging that as an error
+                    // produces confusing noise with no actionable information.
+                    if (code !== 0) {
+                        const errBuf = Buffer.concat(errChunks).toString().trim();
                         log.appendLine(`[win32 error] exit code=${code}  stderr: ${errBuf}`);
                         log.show(true);
                     } else {
