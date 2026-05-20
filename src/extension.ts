@@ -110,7 +110,7 @@ function playAudioNative(soundPath: string, volume: number): void {
 
             case 'win32': {
                 // Use PowerShell's WPF MediaPlayer – hidden window, no extra installs needed.
-                const safePath = soundPath.replace(/\\/g, '/');
+                const safePath = soundPath.replace(/\\/g, '/').replace(/'/g, "''");
                 const script = [
                     'Add-Type -AssemblyName PresentationCore;',
                     `$p = New-Object System.Windows.Media.MediaPlayer;`,
@@ -179,7 +179,9 @@ function spawnWithFallbacks(soundPath: string, volume: number, opts: cp.SpawnOpt
         };
 
         child.on('error', advance);
-        child.on('exit', (code) => { if (code !== 0 && code !== null) { advance(); } });
+        child.on('exit', (code, signal) => {
+            if ((code !== 0 && code !== null) || signal !== null) { advance(); }
+        });
         child.unref();
     }
 
