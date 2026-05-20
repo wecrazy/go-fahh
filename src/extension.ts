@@ -2,6 +2,14 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/**
+ * How long (ms) to keep the PowerShell audio process alive on Windows.
+ * The fahh clip is ~3 s; 5 s gives a comfortable buffer.
+ */
+const AUDIO_PLAYBACK_TIMEOUT_MS = 5000;
+
 // ─── State ───────────────────────────────────────────────────────────────────
 
 /** Tracks the error count per file URI so we only react to *new* errors. */
@@ -108,7 +116,7 @@ function playAudioNative(soundPath: string, volume: number): void {
                     `$p.Open([Uri]'file:///${safePath}');`,
                     `$p.Volume = ${volume};`,
                     `$p.Play();`,
-                    `Start-Sleep -Milliseconds 5000;`,
+                    `Start-Sleep -Milliseconds ${AUDIO_PLAYBACK_TIMEOUT_MS};`,
                 ].join(' ');
                 const child = cp.spawn(
                     'powershell',
@@ -121,7 +129,7 @@ function playAudioNative(soundPath: string, volume: number): void {
 
             default: {
                 // Linux / other – try players in order of preference
-                spawnWithFallbacks(soundPath, opts);
+                spawnWithFallbacks(soundPath, volume, opts);
                 break;
             }
         }
@@ -133,12 +141,21 @@ function playAudioNative(soundPath: string, volume: number): void {
 /**
  * On Linux, try audio players one by one until one succeeds.
  * Preference order: paplay (PulseAudio/PipeWire) → mpg123 → ffplay
+ *
+ * Volume mappings:
+ *  - paplay  : --volume 0–65536 (65536 = 100 %)
+ *  - mpg123  : -f 0–32768 (32768 = 100 %)
+ *  - ffplay  : -volume 0–100
  */
-function spawnWithFallbacks(soundPath: string, opts: cp.SpawnOptions): void {
+function spawnWithFallbacks(soundPath: string, volume: number, opts: cp.SpawnOptions): void {
+    const paVolume = String(Math.round(volume * 65536));
+    const mpg123Scale = String(Math.round(volume * 32768));
+    const ffVolume = String(Math.round(volume * 100));
+
     const players: Array<{ cmd: string; args: string[] }> = [
-        { cmd: 'paplay', args: [soundPath] },
-        { cmd: 'mpg123', args: ['-q', soundPath] },
-        { cmd: 'ffplay', args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', soundPath] },
+        { cmd: 'paplay', args: [`--volume=${paVolume}`, soundPath] },
+        { cmd: 'mpg123', args: ['-q', '-f', mpg123Scale, soundPath] },
+        { cmd: 'ffplay', args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-volume', ffVolume, soundPath] },
     ];
 
     function tryNext(index: number): void {
